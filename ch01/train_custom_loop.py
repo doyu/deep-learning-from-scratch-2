@@ -1,60 +1,96 @@
+#!/usr/bin/env python
 # coding: utf-8
+
 import sys
-sys.path.append('..')  # 親ディレクトリのファイルをインポートするための設定
 import numpy as np
-from common.optimizer import SGD
-from dataset import spiral
 import matplotlib.pyplot as plt
-from two_layer_net import TwoLayerNet
+
+sys.path.append('..')  # 親ディレクトリのファイルをインポートするための設定
+from dataset import spiral
+from common.functions import softmax, sigmoid, cross_entropy_error
+
+# Data preparation
+x, t = spiral.load_data()
+print(list(map(lambda x: np.array(x).shape, [x, t])))
+plt.scatter(x[:,0], x[:,1], c=np.argmax(t, axis=1))
 
 
-# ハイパーパラメータの設定
-max_epoch = 300
+# Build up NN
+
+# Hyper parameters
 batch_size = 30
 hidden_size = 10
 learning_rate = 1.0
 
-x, t = spiral.load_data()
-model = TwoLayerNet(input_size=2, hidden_size=hidden_size, output_size=3)
-optimizer = SGD(lr=learning_rate)
+# Initialize weights and bias
+W1 = 0.01 * np.random.randn(len(x[0]), hidden_size)
+b1 = np.zeros(1)
+W2 = 0.01 * np.random.randn(hidden_size, len(t[0]))
+b2 = np.zeros(1)
 
-# 学習で使用する変数
-data_size = len(x)
-max_iters = data_size // batch_size
-total_loss = 0
-loss_count = 0
+def numerical_gradient(f, x):
+    h = 1e-4 # 0.0001
+    grad = np.zeros_like(x)
+    
+    it = np.nditer(x, flags=['multi_index'], op_flags=['readwrite'])
+    while not it.finished:
+        idx = it.multi_index
+        tmp_val = x[idx]
+        x[idx] = tmp_val + h
+        fxh1 = f(x) # f(x+h)
+        
+        x[idx] = tmp_val - h 
+        fxh2 = f(x) # f(x-h)
+        grad[idx] = (fxh1 - fxh2) / (2*h)
+        
+        x[idx] = tmp_val # 値を元に戻す
+        it.iternext()   
+        
+    return grad
+
+def predict(x):
+    a1 = np.dot(x, W1) + b1
+    z1 = sigmoid(a1)
+    a2 = np.dot(z1, W2) + b2
+    return a2
+
+def loss(x, t):
+    z = predict(x)
+    y = softmax(z)
+    return cross_entropy_error(y, t)
+
+def update(x, t):
+    params = [W1, b1, W2, b2]
+    f = lambda p: loss(x, t)
+    grads = [numerical_gradient(f, param) for param in params]
+    for p, g in zip(params, grads):
+        p -= learning_rate * g
+
+
+#%%time
+# Train NN
+
 loss_list = []
-
-for epoch in range(max_epoch):
+for epoch in range(300):
     # データのシャッフル
-    idx = np.random.permutation(data_size)
-    x = x[idx]
-    t = t[idx]
+    idx = np.random.permutation(len(x))
+    x, t = x[idx], t[idx]
 
-    for iters in range(max_iters):
-        batch_x = x[iters*batch_size:(iters+1)*batch_size]
-        batch_t = t[iters*batch_size:(iters+1)*batch_size]
+    max = len(x) // batch_size
+    for i in range(max):
+        idx = np.arange(i*batch_size, (i+1)*batch_size) 
+        xx, tt = x[idx], t[idx]
 
-        # 勾配を求め、パラメータを更新
-        loss = model.forward(batch_x, batch_t)
-        model.backward()
-        optimizer.update(model.params, model.grads)
+        _loss = loss(xx, tt)
+        loss_list.append(_loss)
+        
+        update(xx, tt)
 
-        total_loss += loss
-        loss_count += 1
-
-        # 定期的に学習経過を出力
-        if (iters+1) % 10 == 0:
-            avg_loss = total_loss / loss_count
-            print('| epoch %d |  iter %d / %d | loss %.2f'
-                  % (epoch + 1, iters + 1, max_iters, avg_loss))
-            loss_list.append(avg_loss)
-            total_loss, loss_count = 0, 0
-
-
+        
 # 学習結果のプロット
+print(f"loss={_loss}")          
 plt.plot(np.arange(len(loss_list)), loss_list, label='train')
-plt.xlabel('iterations (x10)')
+plt.xlabel('iterations')
 plt.ylabel('loss')
 plt.show()
 
@@ -64,7 +100,7 @@ x_min, x_max = x[:, 0].min() - .1, x[:, 0].max() + .1
 y_min, y_max = x[:, 1].min() - .1, x[:, 1].max() + .1
 xx, yy = np.meshgrid(np.arange(x_min, x_max, h), np.arange(y_min, y_max, h))
 X = np.c_[xx.ravel(), yy.ravel()]
-score = model.predict(X)
+score = predict(X)
 predict_cls = np.argmax(score, axis=1)
 Z = predict_cls.reshape(xx.shape)
 plt.contourf(xx, yy, Z)
@@ -78,3 +114,4 @@ markers = ['o', 'x', '^']
 for i in range(CLS_NUM):
     plt.scatter(x[i*N:(i+1)*N, 0], x[i*N:(i+1)*N, 1], s=40, marker=markers[i])
 plt.show()
+
